@@ -13,6 +13,10 @@ implementation 'org.springframework.boot:spring-boot-starter-webflux'
 - 최종적으론 WebRtc에 사용할 signaling 서버를 구축 목적 (peer 간 메타 정보 전달을 보장하기 위해 peer 간 1:1 채널이 필요)
 
 ### 기록
+- 실행 일단 gradle로 
+```shell
+gradle bootRun
+```
 - 채널 메시지 경우 멀티인스턴스 간 메시지 브로커 역할의 Redis 필요 
 ```shell
 docker run --name some-redis -p 6379:6379 -d redis

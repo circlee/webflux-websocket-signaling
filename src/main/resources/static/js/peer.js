@@ -66,7 +66,6 @@ const webSocketCtrl = (function(){
 
         $self.ws.onopen = function(event){
             messageHandler('onopen', event);
-            $self.send({type:'CHANNEL_JOIN', messageBody:''})
         }
     }
 
@@ -146,46 +145,53 @@ async function start() {
 }
 
 async function streamOpen(){
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({audio: true, video: true});
+        console.log('local stream 획득');
+        // local Video Elm 에 localStream 주입
+        localVideo.srcObject = stream;
+        localStream = stream;
 
-    const stream = await navigator.mediaDevices.getUserMedia({audio: true, video: true});
-    console.log('local stream 획득');
-    // local Video Elm 에 localStream 주입
-    localVideo.srcObject = stream;
-    localStream = stream;
 
+        hangupButton.disabled = false;
+        console.log('Starting call');
+        startTime = window.performance.now();
+        const videoTracks = localStream.getVideoTracks();
+        const audioTracks = localStream.getAudioTracks();
 
-    hangupButton.disabled = false;
-    console.log('Starting call');
-    startTime = window.performance.now();
-    const videoTracks = localStream.getVideoTracks();
-    const audioTracks = localStream.getAudioTracks();
-
-    if (videoTracks.length > 0) {
-        console.log(`Using video device: ${videoTracks[0].label}`);
-    }
-    if (audioTracks.length > 0) {
-        console.log(`Using audio device: ${audioTracks[0].label}`);
-    }
-
-    const configuration = getSelectedSdpSemantics();
-
-    configuration.iceServers = [{
-        urls: "stun:stun.l.google.com:19302"
-    }];
-
-    localPeerConnection = new RTCPeerConnection(configuration);
-    localPeerConnection.addEventListener('icecandidate', e => onIceCandidate(e));
-    localPeerConnection.addEventListener('iceconnectionstatechange', e => onIceStateChange(e));
-
-    localPeerConnection.addEventListener('track',  function(e) {
-        console.log('track' , e);
-        if (remoteVideo.srcObject !== e.streams[0]) {
-            remoteVideo.srcObject = e.streams[0];
-            console.log('received remote stream');
+        if (videoTracks.length > 0) {
+            console.log(`Using video device: ${videoTracks[0].label}`);
         }
-    });
+        if (audioTracks.length > 0) {
+            console.log(`Using audio device: ${audioTracks[0].label}`);
+        }
 
-    localStream.getTracks().forEach(track => localPeerConnection.addTrack(track, localStream));
+        const configuration = getSelectedSdpSemantics();
+
+        configuration.iceServers = [{
+            urls: "stun:stun.l.google.com:19302"
+        }];
+
+        localPeerConnection = new RTCPeerConnection(configuration);
+        localPeerConnection.addEventListener('icecandidate', e => onIceCandidate(e));
+        localPeerConnection.addEventListener('iceconnectionstatechange', e => onIceStateChange(e));
+
+        localPeerConnection.addEventListener('track', function (e) {
+            console.log('track', e);
+            if (remoteVideo.srcObject !== e.streams[0]) {
+                remoteVideo.srcObject = e.streams[0];
+                console.log('received remote stream');
+            }
+        });
+
+        localStream.getTracks().forEach(track => localPeerConnection.addTrack(track, localStream));
+
+        // open and channel join
+        webSocketCtrl.send({type: 'CHANNEL_JOIN', messageBody: ''})
+        
+    } catch (e) {
+        alert('error :' + e);
+    }
 }
 
 

@@ -15,6 +15,10 @@ hangupButton.disabled = true;
 startButton.addEventListener('click', start);
 hangupButton.addEventListener('click', hangup);
 
+
+websocketAddr.value = 'ws://' + location.host + '/channels/TEST-001';
+
+
 let startTime;
 const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');

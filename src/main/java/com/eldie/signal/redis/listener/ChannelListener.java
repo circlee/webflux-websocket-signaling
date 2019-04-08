@@ -13,7 +13,7 @@ public class ChannelListener{
     private final Flux< ? extends ReactiveSubscription.Message<String, ChannelMessage>> channelPublisher;
 
     public ChannelListener(ReactiveRedisOperations<String, ChannelMessage> redisOperations){
-        this.channelPublisher =  redisOperations.listenToChannel("channels");
+        this.channelPublisher =  redisOperations.listenToPattern("channels/*");
     }
 
     public Flux< ? extends ReactiveSubscription.Message<String, ChannelMessage>> listen(){

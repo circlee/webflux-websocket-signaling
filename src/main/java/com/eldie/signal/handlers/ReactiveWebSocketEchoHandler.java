@@ -6,13 +6,11 @@ import org.reactivestreams.Subscription;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.socket.CloseStatus;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
-
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 @Component
 public class ReactiveWebSocketEchoHandler implements WebSocketHandler {
@@ -33,31 +31,30 @@ public class ReactiveWebSocketEchoHandler implements WebSocketHandler {
 
         EchoSubPublisher echoSubPublisher = new EchoSubPublisher(webSocketSession);
         webSocketSession.receive()
-                .doOnTerminate(()-> {log.debug("doOnTerminate");})
+                .limitRate(25)
+                .doOnError((t) -> {
+                    log.error("session receive error : {}" , t);
+                    echoSubPublisher.onError(t);
+                })
+                .doOnTerminate(()-> {
+                    log.debug("doOnTerminate");
+                    webSocketSession.close(CloseStatus.NORMAL);
+                })
                 .doFinally(a -> {
                     log.debug("doFinally");
-                    webSocketSession.close();
                 })
                 .subscribe(echoSubPublisher);
-
-        Executors.newSingleThreadExecutor().execute(() -> {
-            while(true) {
-
-                try {
-                    TimeUnit.SECONDS.sleep(5);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-                echoSubPublisher.customSend(" From Server Ping " + System.currentTimeMillis());
-            }
-        });
 
 
 
         webSocketSession.textMessage("");
 
 
-        return webSocketSession.send(echoSubPublisher);
+
+        Mono<Void> sendMono = webSocketSession.send(echoSubPublisher);
+
+
+        return sendMono;
     }
 
     private static class EchoSubPublisher implements Publisher<WebSocketMessage>, Subscriber<WebSocketMessage>, Subscription {
@@ -104,7 +101,10 @@ public class ReactiveWebSocketEchoHandler implements WebSocketHandler {
 
         @Override
         public void onError(Throwable t) {
+            log.error("subpub receive error : {}" , t);
+
             subscriber.onError(t);
+            subscriber.onComplete();
         }
 
         @Override

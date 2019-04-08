@@ -2,7 +2,10 @@ package com.eldie.signal.handlers;
 
 import com.eldie.signal.redis.listener.ChannelListener;
 import com.eldie.signal.redis.listener.ChannelPublisher;
+import com.eldie.signal.redis.model.BaseMessage;
 import com.eldie.signal.redis.model.ChannelMessage;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
@@ -16,6 +19,7 @@ import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
 
+import java.io.IOException;
 import java.util.UUID;
 
 
@@ -25,11 +29,18 @@ public class ReactiveWebSocketChannelHandler implements WebSocketHandler {
     private final Logger log = LoggerFactory.getLogger(ReactiveWebSocketChannelHandler.class);
 
 
+    ObjectMapper om = new ObjectMapper();
+
     @Autowired
     ChannelListener channelListener;
 
     @Autowired
     ChannelPublisher channelPublisher;
+
+    @Autowired
+    ObjectMapper objectMapper;
+
+
 
     @Override
     public Mono<Void> handle(WebSocketSession webSocketSession) {
@@ -37,11 +48,14 @@ public class ReactiveWebSocketChannelHandler implements WebSocketHandler {
 
         log.debug("HANDLE --> " + webSocketSession);
 
+        webSocketSession.getAttributes().put("CHANNEL_ID", webSocketSession.getAttributes().get(HandlerMapping.PATH_WITHIN_HANDLER_MAPPING_ATTRIBUTE));
+
         webSocketSession.getAttributes().put("I", UUID.randomUUID().toString());
 
-        RedisSubPubliser redisSubPubliser = new RedisSubPubliser(webSocketSession , channelListener, channelPublisher);
+        RedisSubPubliser redisSubPubliser = new RedisSubPubliser(webSocketSession , channelListener, channelPublisher, objectMapper);
 
         webSocketSession.receive()
+                .limitRate(25)
                 .doOnTerminate(()-> { log.debug("doOnTerminate"); })
                 .doFinally(a -> {
                     log.debug("doFinally");
@@ -67,14 +81,31 @@ public class ReactiveWebSocketChannelHandler implements WebSocketHandler {
 
         ChannelPublisher channelPublisher;
 
-        public RedisSubPubliser(WebSocketSession webSocketSession , ChannelListener channelListener, ChannelPublisher channelPublisher) {
+        ObjectMapper objectMapper;
+
+        String channelId;
+        String channelPath;
+        String me;
+
+        public RedisSubPubliser(WebSocketSession webSocketSession , ChannelListener channelListener, ChannelPublisher channelPublisher, ObjectMapper objectMapper) {
             this.webSocketSession = webSocketSession;
             this.channelListener = channelListener;
             this.channelPublisher = channelPublisher;
-
-            channelListener.listen().subscribe((s) -> {
-                subscriber.onNext(webSocketSession.textMessage(s.getMessage().toString()));
-            });
+            this.objectMapper = objectMapper;
+            channelId = webSocketSession.getAttributes().get("CHANNEL_ID").toString();
+            channelPath = "channels/"+ channelId;
+            me = webSocketSession.getAttributes().get("I").toString();
+            channelListener.listen()
+                    .filter(m -> m.getChannel().equals(channelPath))
+                    .map(message -> message.getMessage())
+                    .filter(message -> !message.getMessageFrom().equals(me))
+                    .subscribe((message) -> {
+                        try {
+                            subscriber.onNext(webSocketSession.textMessage(objectMapper.writeValueAsString(message)));
+                        } catch (JsonProcessingException e) {
+                            e.printStackTrace();
+                        }
+                    });
         }
 
         @Override
@@ -91,29 +122,40 @@ public class ReactiveWebSocketChannelHandler implements WebSocketHandler {
             this.receiveSubscrition.request(1);
         }
 
-        public void customSend(String text){
-            subscriber.onNext(webSocketSession.textMessage(text));
-        }
+
 
         public void onNext(WebSocketMessage message) {
 
-            String text = message.getPayloadAsText();
-
-            log.debug("TEXT : {}" ,text);
 
             ChannelMessage cm = new ChannelMessage();
-            cm.setChannelId(webSocketSession.getAttributes().get(HandlerMapping.PATH_WITHIN_HANDLER_MAPPING_ATTRIBUTE).toString());
-            cm.setMessageBody(text);
-            cm.setMessageFrom(webSocketSession.getAttributes().get("I").toString());
-            cm.setAction(ChannelMessage.Action.IN);
-            cm.setType(ChannelMessage.Type.MESSAGE);
-            channelPublisher.convertAndSend("channels", cm).subscribe((r) -> log.debug("send result : {}", r));
+
+            WebSocketMessage.Type type = message.getType();
+            String payloadText = message.getPayloadAsText();
+
+            cm.setChannelId(channelId);
+            cm.setMessageFrom(me);
+
+            log.debug("TEXT : {}" ,payloadText);
+
+            try {
+                BaseMessage baseMessage = objectMapper.readValue(payloadText, BaseMessage.class);
+
+                cm.setMessageBody(baseMessage.getMessageBody());
+                cm.setType(baseMessage.getType());
+
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
+            channelPublisher.convertAndSend(channelPath, cm).subscribe((r) -> log.debug("send result : {}", r));
 
             this.receiveSubscrition.request(1);
         }
 
         @Override
         public void onError(Throwable t) {
+
+            log.error("Error : {}", t);
             subscriber.onError(t);
         }
 
